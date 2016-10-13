@@ -1,50 +1,37 @@
-library(reshape2)
+library(dplyr)
 
-filename <- "getdata_dataset.zip"
+# Base data
+activities <- read.delim("activity_labels.txt", header = FALSE, sep = "", col.names = c("ActivityId", "ActivityName"))
+features <- read.delim("features.txt", header = FALSE, sep = "", col.names = c("FeatureId", "FeatureName"), stringsAsFactors = FALSE)
 
-## Download and unzip the dataset:
-if (!file.exists(filename)){
-  fileURL <- "https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR%20Dataset.zip "
-  download.file(fileURL, filename, method="curl")
-}  
-if (!file.exists("UCI HAR Dataset")) { 
-  unzip(filename) 
-}
+# Load training set
+train.subjects <- read.delim("train/subject_train.txt", header = FALSE, sep = "", col.names = c("SubjectId"))
+train.activities <- read.delim("train/y_train.txt", header = FALSE, sep = "", col.names = c("ActivityId"))
+train.set <- read.delim("train/X_train.txt", header = FALSE, sep = "", col.names = features$FeatureName)
+train.data <- tbl_df(cbind(train.subjects, train.activities, train.set))
 
-# Load activity labels + features
-activityLabels <- read.table("UCI HAR Dataset/activity_labels.txt")
-activityLabels[,2] <- as.character(activityLabels[,2])
-features <- read.table("UCI HAR Dataset/features.txt")
-features[,2] <- as.character(features[,2])
+# Load test set
+test.subjects <- read.delim("test/subject_test.txt", header = FALSE, sep = "", col.names = c("SubjectId"))
+test.activities <- read.delim("test/y_test.txt", header = FALSE, sep = "", col.names = c("ActivityId"))
+test.set <- read.delim("test/X_test.txt", header = FALSE, sep = "", col.names = features$FeatureName)
+test.data <- tbl_df(cbind(test.subjects, test.activities, test.set))
 
-# Extract only the data on mean and standard deviation
-featuresWanted <- grep(".*mean.*|.*std.*", features[,2])
-featuresWanted.names <- features[featuresWanted,2]
-featuresWanted.names = gsub('-mean', 'Mean', featuresWanted.names)
-featuresWanted.names = gsub('-std', 'Std', featuresWanted.names)
-featuresWanted.names <- gsub('[-()]', '', featuresWanted.names)
+# Unify data sets and improve column names
+all <- rbind(train.data, test.data)
+all <- all %>% inner_join(activities)
+all <- all %>% select(SubjectId, ActivityName, contains("mean.."), contains("std.."))
+all <- all %>% setNames(gsub("^f", "FrequencyDomain", names(.)))
+all <- all %>% setNames(gsub("^t", "TimeDomain", names(.)))
+all <- all %>% setNames(gsub("Acc", "Accelerometer", names(.)))
+all <- all %>% setNames(gsub("Gyro", "Gyroscope", names(.)))
+all <- all %>% setNames(gsub("Mag", "Magnitude", names(.)))
+all <- all %>% setNames(gsub("mean\\.\\.", "Mean", names(.)))
+all <- all %>% setNames(gsub("std\\.\\.", "Std", names(.)))
+all <- all %>% setNames(gsub("\\.", "", names(.)))
+all <- all %>% select(-starts_with("angle"))
 
-
-# Load the datasets
-train <- read.table("UCI HAR Dataset/train/X_train.txt")[featuresWanted]
-trainActivities <- read.table("UCI HAR Dataset/train/Y_train.txt")
-trainSubjects <- read.table("UCI HAR Dataset/train/subject_train.txt")
-train <- cbind(trainSubjects, trainActivities, train)
-
-test <- read.table("UCI HAR Dataset/test/X_test.txt")[featuresWanted]
-testActivities <- read.table("UCI HAR Dataset/test/Y_test.txt")
-testSubjects <- read.table("UCI HAR Dataset/test/subject_test.txt")
-test <- cbind(testSubjects, testActivities, test)
-
-# merge datasets and add labels
-allData <- rbind(train, test)
-colnames(allData) <- c("subject", "activity", featuresWanted.names)
-
-# turn activities & subjects into factors
-allData$activity <- factor(allData$activity, levels = activityLabels[,1], labels = activityLabels[,2])
-allData$subject <- as.factor(allData$subject)
-
-allData.melted <- melt(allData, id = c("subject", "activity"))
-allData.mean <- dcast(allData.melted, subject + activity ~ variable, mean)
-
-write.table(allData.mean, "tidy.txt", row.names = FALSE, quote = FALSE)
+# Create a second, summarized data set with the mean value for each variable, grouped by subject and feature
+summary <- all %>% group_by(SubjectId, ActivityName)
+summary <- summary %>% summarize_each(funs(mean))
+write.table(summary, file = "summarized-data.txt", row.name = FALSE)
+print(summary)
